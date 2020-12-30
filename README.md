@@ -1,14 +1,11 @@
 # Collyzar
 
-------------
-
 A distributed redis-based framework for colly.        
 
 Collyzar provides a very simple configuration and tools to implement distributed crawling/scraping.       
 
 ## Features
 
-------------
 - Simple configuration and clean API       
 - Distributed crawling/scraping     
 - Support redis command     
@@ -17,8 +14,6 @@ Collyzar provides a very simple configuration and tools to implement distributed
 - Pass additional information to the crawler and get it inside the crawler and store it in the database    
 
 ## Installation
-
-------------
 
 Add collyzar to your go.mod file:       
 ```
@@ -33,11 +28,9 @@ require (
 
 ## Example Usage
 
-------------
+See [examples folder](https://github.com/Zartenc/collyzar/tree/master/examples "examples folder") for more detailed examples.    
 
 ### Crawler cluster machine
-
-------------
 
 SpiderName must be unique.      
 
@@ -58,8 +51,8 @@ func myResponse(response *collyzar.ZarResponse){
 
 ### Control machine
 
-------------
 #### Push url to redis queue
+
 ```
 func main(){
 		ts := collyzar.NewToolSpider("127.0.0.1", 6379, "", "zarten")
@@ -76,9 +69,11 @@ func main(){
 ```    
 
 #### Tools
+
 Provide tools including stop crawlers and pause crawlers.     
 
 ##### Stop all crawlers
+
 ```
 func main() {
 		ts := collyzar.NewToolSpider("127.0.0.1", 6379, "", "zarten")
@@ -90,7 +85,9 @@ func main() {
 }
 
 ```    
+
 ##### Pause  all crawlers
+
 For all crawlers, the crawler process is idle after pausing the crawler.      
 Then you can use the* **WakeupSpiders*** method to wake up the crawlers.     
 ```
@@ -104,16 +101,12 @@ func main() {
 }
 
 ```     
-See [examples folder](https://github.com/Zartenc/collyzar/tree/master/examples "examples folder") for more detailed examples.
+
 
 ## Bugs
-
-------------
 
 Bugs or suggestions? Visit the [issue tracker](https://github.com/Zartenc/collyzar/issues "issue tracker")    
 
 ## Contributing
-
-------------
 
 If you wish to contribute to this project, please branch and issue a pull request against master ("[GitHub Flow](https://guides.github.com/introduction/flow/ "GitHub Flow")").
