@@ -45,7 +45,6 @@ func main(){
 
 func myResponse(response *collyzar.ZarResponse){
 	fmt.Println(response.StatusCode)
-	fmt.Println(response.PushInfos)
 }
 ```    
 
@@ -90,7 +89,7 @@ func main() {
 ##### Pause  all crawlers
 
 For all crawlers, the crawler process is idle after pausing the crawler.      
-Then you can use the* **WakeupSpiders*** method to wake up the crawlers.     
+Then you can use the **WakeupSpiders** method to wake up the crawlers.     
 ```
 func main() {
 	ts := collyzar.NewToolSpider("127.0.0.1", 6379, "", "zarten")
