@@ -173,9 +173,8 @@ func Run(callback Callback){
 
 func spiderQueue(c *colly.Collector){
 	pool := &redis.Pool{
-		MaxActive:1000,
-		MaxIdle:500,
-		Wait:true,
+		MaxActive:0,
+		MaxIdle:5000,
 		Dial:func() (redis.Conn, error) {
 			conn, err := redis.Dial("tcp", RedisIp + ":" + strconv.Itoa(RedisPort),
 				redis.DialPassword(RedisPW),
