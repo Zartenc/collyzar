@@ -13,13 +13,12 @@ type ToolSpider struct {
 
 func NewToolSpider(redisIp string, redisPort int, redisPw ,spiderName string) *ToolSpider{
 	pool := &redis.Pool{
-		MaxActive:1000,
-		MaxIdle:500,
+		MaxActive:0,
 		Wait:true,
 		Dial:func() (redis.Conn, error) {
 			conn, err := redis.Dial("tcp", redisIp + ":" + strconv.Itoa(redisPort),
 				redis.DialPassword(redisPw),
-				redis.DialDatabase(0),)
+				redis.DialDatabase(1),)
 			if err != nil {
 				return nil, err
 			}
