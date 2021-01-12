@@ -14,7 +14,7 @@ type ToolSpider struct {
 func NewToolSpider(redisIp string, redisPort int, redisPw ,spiderName string) *ToolSpider{
 	pool := &redis.Pool{
 		MaxActive:0,
-		Wait:true,
+		MaxIdle:5000,
 		Dial:func() (redis.Conn, error) {
 			conn, err := redis.Dial("tcp", redisIp + ":" + strconv.Itoa(redisPort),
 				redis.DialPassword(redisPw),
