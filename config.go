@@ -1,27 +1,28 @@
 package collyzar
 
-//must-settings
-var (
-	SpiderName = ""
-	Domain = ""
-	RedisIp = ""
-	RedisPort = 6379
-	RedisPW = ""
-)
+//must-settings.
+//Structure members must be initialized.
+type CollyzarSettings struct {
+	SpiderName string
+	Domain string
+	RedisIp string
+	RedisPort int //default 6379
+	RedisPW string
+}
 
-//spider-settings
-var (
-	Referer = ""
-	Cookie = ""
-	ConcurrentRequest = 20
-	DownloadTimeout = 120
-	RandomDelay = 0
-	DisableCookies = true
-	ProxyUrls = []string{}
-	IsRetry = true
-	RetryTimes = 3
-
-)
+//spider-settings.
+//Structure members are optional.
+type SpiderSettings struct {
+	Referer string
+	Cookie string
+	ProxyUrls []string
+	ConcurrentRequest int //default 20
+	DownloadTimeout int //default 120
+	RandomDelay int //default 0
+	DisableCookies bool //default true
+	IsRetry bool //default true
+	RetryTimes int //default 3
+}
 
 type PushInfo struct {
 	Url string

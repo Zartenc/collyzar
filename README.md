@@ -37,10 +37,12 @@ SpiderName must be unique.
 After running, it will always monitor the redis crawler queue for crawling until it receives a pause or stop signal.     
 ```
 func main(){
-	collyzar.SpiderName = "zarten"
-	collyzar.Domain = "www.amazon.com"
-	collyzar.RedisIp = "127.0.0.1"
-	collyzar.Run(myResponse)
+    cs := &collyzar.CollyzarSettings{
+    		SpiderName: "zarten",
+    		Domain:     "www.amazon.com",
+    		RedisIp:    "127.0.0.1",
+    	}
+	collyzar.Run(myResponse, cs, nil)
 }
 
 func myResponse(response *collyzar.ZarResponse){

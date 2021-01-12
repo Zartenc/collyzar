@@ -35,8 +35,25 @@ type Callback func(*ZarResponse)
 
 var gSpiderStatus = "0" //0:running 1:pause 2:stop
 
+var (
+	spiderName string
+	domain string
+	redisIp string
+	redisPort int //default 6379
+	redisPW string
+	referer string
+	cookie string
+	proxyUrls []string
+	concurrentRequest int //default 20
+	downloadTimeout int //default 120
+	randomDelay int //default 0
+	disableCookies bool //fefault true
+	isRetry bool //default true
+	retryTimes int //default 3
+)
+
 func (zar *ZarResponse) RequestNew(newPushInfos PushInfo) error{
-	ts := NewToolSpider(RedisIp, RedisPort, RedisPW, SpiderName)
+	ts := NewToolSpider(redisIp, redisPort, redisPW, spiderName)
 	err := ts.PushToQueue(newPushInfos)
 	if err != nil{
 		return err
@@ -44,8 +61,59 @@ func (zar *ZarResponse) RequestNew(newPushInfos PushInfo) error{
 	return nil
 }
 
-func Run(callback Callback){
-	if SpiderName == "" || Domain == "" || RedisIp == ""{
+func initParam(cs *CollyzarSettings, ss *SpiderSettings){
+	if cs == nil{
+		log.WithFields(log.Fields{
+			"collyzar": "must settings error",
+		}).Fatalln("CollyzarSettings must be initialized")
+		return
+	}
+	if ss == nil{
+		ss = &SpiderSettings{}
+	}
+	spiderName = cs.SpiderName
+	domain = cs.Domain
+	redisIp = cs.RedisIp
+	redisPort = cs.RedisPort //default 6379
+	redisPW = cs.RedisPW
+
+	referer = ss.Referer
+	cookie = ss.Cookie
+	proxyUrls = ss.ProxyUrls
+	concurrentRequest = ss.ConcurrentRequest //default 20
+	downloadTimeout = ss.DownloadTimeout //default 120
+	randomDelay = ss.RandomDelay //default 0
+	disableCookies = ss.DisableCookies //default true
+	isRetry = ss.IsRetry //default true
+	retryTimes = ss.RetryTimes //default 3
+
+	if redisPort == 0{
+		redisPort = 6379
+	}
+	if concurrentRequest == 0{
+		concurrentRequest = 20
+	}
+	if downloadTimeout == 0{
+		downloadTimeout = 120
+	}
+	if randomDelay == 0{
+		randomDelay = 0
+	}
+	if disableCookies == false{
+		disableCookies = true
+	}
+	if isRetry == false{
+		isRetry = true
+	}
+	if retryTimes == 0{
+		retryTimes = 3
+	}
+
+}
+
+func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings){
+	initParam(cs, ss)
+	if spiderName == "" || domain == "" || redisIp == ""{
 		log.WithFields(log.Fields{
 			"collyzar": "settings error",
 		}).Fatalln("must configure must-settings")
@@ -54,15 +122,15 @@ func Run(callback Callback){
 	var err error
 
 	c := colly.NewCollector(
-		colly.AllowedDomains(Domain),
+		colly.AllowedDomains(domain),
 		colly.Async(true),
 		colly.AllowURLRevisit(),
 		colly.IgnoreRobotsTxt(),
 	)
 	err = c.Limit(&colly.LimitRule{
-		DomainGlob: Domain,
-		RandomDelay:  time.Duration(RandomDelay) * time.Second,
-		Parallelism: ConcurrentRequest,
+		DomainGlob: domain,
+		RandomDelay:  time.Duration(randomDelay) * time.Second,
+		Parallelism: concurrentRequest,
 	})
 	if err != nil{
 		log.WithFields(log.Fields{
@@ -76,16 +144,16 @@ func Run(callback Callback){
 		TLSClientConfig:&tls.Config{InsecureSkipVerify: true},
 	})
 
-	c.SetRequestTimeout(time.Second * time.Duration(DownloadTimeout))
+	c.SetRequestTimeout(time.Second * time.Duration(downloadTimeout))
 
-	if DisableCookies{
+	if disableCookies{
 		c.DisableCookies()
 	}
 
 	extensions.RandomUserAgent(c) //desktop ua
 
-	if len(ProxyUrls) >0 {
-		rp, err := proxy.RoundRobinProxySwitcher(ProxyUrls...)
+	if len(proxyUrls) >0 {
+		rp, err := proxy.RoundRobinProxySwitcher(proxyUrls...)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"collyzar": "set proxy switch error",
@@ -95,10 +163,10 @@ func Run(callback Callback){
 	}
 
 	c.OnRequest(func(r *colly.Request) {
-		r.Headers.Set("Referer", Referer)
+		r.Headers.Set("Referer", referer)
 		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 		r.Headers.Set("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
-		r.Headers.Set("Cookie", Cookie)
+		r.Headers.Set("Cookie", cookie)
 
 	})
 
@@ -107,7 +175,7 @@ func Run(callback Callback){
 			"collyzar": "problem with download",
 		}).Debug(err)
 
-		if IsRetry{
+		if isRetry{
 			err = r.Request.Retry()
 			if err != nil{
 				log.WithFields(log.Fields{
@@ -127,7 +195,7 @@ func Run(callback Callback){
 				break
 			}
 		}
-		if IsRetry && isRetryCode{
+		if isRetry && isRetryCode{
 			var reqTimes int
 			reqTimesIf := r.Ctx.GetAny("req_times")
 			if reqTimesIf == nil{
@@ -137,7 +205,7 @@ func Run(callback Callback){
 				reqTimes = reqTimesIf.(int)
 			}
 
-			if reqTimes <= RetryTimes{
+			if reqTimes <= retryTimes{
 				reqTimes += 1
 				r.Request.Ctx.Put("req_times", reqTimes)
 				err = r.Request.Retry()
@@ -176,9 +244,9 @@ func spiderQueue(c *colly.Collector){
 		MaxActive:0,
 		MaxIdle:5000,
 		Dial:func() (redis.Conn, error) {
-			conn, err := redis.Dial("tcp", RedisIp + ":" + strconv.Itoa(RedisPort),
-				redis.DialPassword(RedisPW),
-				redis.DialDatabase(0),)
+			conn, err := redis.Dial("tcp", redisIp + ":" + strconv.Itoa(redisPort),
+				redis.DialPassword(redisPW),
+				redis.DialDatabase(1),)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"collyzar": "connect redis pool error",
@@ -189,8 +257,8 @@ func spiderQueue(c *colly.Collector){
 		},
 	}
 
-	setSpiderSignal(pool, SpiderName)
-	go detectSpiderSignal(pool, SpiderName)
+	setSpiderSignal(pool, spiderName)
+	go detectSpiderSignal(pool, spiderName)
 
 	for{
 		isStop := spiderWatch(pool, c)
@@ -263,7 +331,7 @@ func setSpiderSignal(pool *redis.Pool, spiderId string){
 func genBloomFilter(pool *redis.Pool) *bloom.BloomFilter{
 	rdb := pool.Get()
 
-	bfName := SpiderName + "BF"
+	bfName := spiderName + "BF"
 	m, k := bloom.EstimateParameters(8*1024*1024 * 200, .01)
 	bitSet := bloom.NewRedisBitSet(bfName, m, rdb)
 	bf := bloom.New(m, k, bitSet)
@@ -290,7 +358,7 @@ func cleanRedis(pool *redis.Pool){
 
 		}
 
-	_, err = rdb.Do("HDEL", "collyzar_spider_status", SpiderName)
+	_, err = rdb.Do("HDEL", "collyzar_spider_status", spiderName)
 	if err != nil{
 		log.WithFields(log.Fields{
 			"collyzar": "del redis bloom queue error",
@@ -318,7 +386,7 @@ func spiderWatch(pool *redis.Pool, c *colly.Collector) bool {
 	if gSpiderStatus != "0"{
 		return  false
 	}
-	urlInfoI, err := rdb.Do("RPOP", SpiderName)
+	urlInfoI, err := rdb.Do("RPOP", spiderName)
 	if err != nil{
 		log.WithFields(log.Fields{
 			"collyzar": "get redis spider queue error",
