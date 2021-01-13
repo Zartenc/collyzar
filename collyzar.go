@@ -329,9 +329,7 @@ func setSpiderSignal(pool *redis.Pool, spiderId string){
 	}
 }
 
-func genBloomFilter(pool *redis.Pool) *bloom.BloomFilter{
-	rdb := pool.Get()
-
+func genBloomFilter(rdb redis.Conn) *bloom.BloomFilter{
 	bfName := spiderName + "BF"
 	m, k := bloom.EstimateParameters(8*1024*1024 * 200, .01)
 	bitSet := bloom.NewRedisBitSet(bfName, m, rdb)
@@ -371,7 +369,7 @@ func spiderWatch(pool *redis.Pool, c *colly.Collector) bool {
 	rdb := pool.Get()
 	defer rdb.Close()
 
-	globBF := genBloomFilter(pool)
+	globBF := genBloomFilter(rdb)
 
 	if gSpiderStatus == "1"{
 		log.WithFields(log.Fields{
