@@ -229,7 +229,7 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings){
 			zarRes.Request = zarReq
 			zarRes.PushInfos = r.Ctx.GetAny("url_info").(PushInfo)
 
-			go callback(zarRes)
+			callback(zarRes)
 			}
 
 	})
