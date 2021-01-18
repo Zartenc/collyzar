@@ -387,10 +387,6 @@ func spiderWatch(c *colly.Collector, zarQ *zarQueue, ) bool {
 		return false
 	}
 
-	if zarQ.isFull() {
-		return false
-	}
-
 	urlInfoI := zarQ.pop()
 	if urlInfoI == nil {
 		return false
