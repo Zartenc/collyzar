@@ -2,7 +2,9 @@ package collyzar
 
 import (
 	"encoding/json"
-	"github.com/gomodule/redigo/redis"
+	"github.com/garyburd/redigo/redis"
+
+	//"github.com/gomodule/redigo/redis"
 	"strconv"
 )
 

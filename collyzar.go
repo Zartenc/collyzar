@@ -3,11 +3,11 @@ package collyzar
 import (
 	"crypto/tls"
 	"encoding/json"
+	"github.com/go-redis/redis"
 	"github.com/gocolly/colly/v2"
 	"github.com/gocolly/colly/v2/extensions"
 	"github.com/gocolly/colly/v2/proxy"
 	"github.com/gocolly/redisstorage"
-	"github.com/gomodule/redigo/redis"
 	log "github.com/sirupsen/logrus"
 	"math/rand"
 	"net/http"
@@ -80,7 +80,7 @@ func (z *zarQueue) pop() interface{} {
 	if len(z.queue) == 0 {
 		return nil
 	}
-	if len(z.queue) >= 1{
+	if len(z.queue) >= 1 {
 		var x interface{}
 		x, z.queue = z.queue[0], z.queue[1:]
 		return x
@@ -201,14 +201,15 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 	}
 
 	storage := &RedisStorage{
-		Storage:&redisstorage.Storage{
+		Storage: &redisstorage.Storage{
 			Address:  redisIp + ":" + strconv.Itoa(redisPort),
 			Password: redisPW,
 			DB:       1,
 			Prefix:   spiderName + "_filter",
 		},
-		IsStorageCookies:false,
+		IsStorageCookies: false,
 	}
+
 	err = c.SetStorage(storage)
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -288,33 +289,15 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 
 	})
 
-	spiderQueue(c, zarQ)
+	spiderQueue(storage.Client, c, zarQ)
 	c.Wait()
 
 }
 
-func spiderQueue(c *colly.Collector, zarQ *zarQueue) {
-	pool := &redis.Pool{
-		MaxActive: 7000,
-		MaxIdle:   2000,
-		Wait:      true,
-		Dial: func() (redis.Conn, error) {
-			conn, err := redis.Dial("tcp", redisIp+":"+strconv.Itoa(redisPort),
-				redis.DialPassword(redisPW),
-				redis.DialDatabase(1), )
-			if err != nil {
-				log.WithFields(log.Fields{
-					"collyzar": "connect redis pool error",
-				}).Fatalln(err)
-				return nil, err
-			}
-			return conn, nil
-		},
-	}
-
-	setSpiderSignal(pool, spiderName)
-	go detectSpiderSignal(pool, spiderName)
-	go getInfo(pool, zarQ)
+func spiderQueue(rdb *redis.Client, c *colly.Collector, zarQ *zarQueue) {
+	setSpiderSignal(rdb, spiderName)
+	go detectSpiderSignal(rdb, spiderName)
+	go getInfo(rdb, zarQ)
 
 	for {
 		isStop := spiderWatch(c, zarQ)
@@ -324,41 +307,34 @@ func spiderQueue(c *colly.Collector, zarQ *zarQueue) {
 		pauseTime := rand.Intn(1000) //0-1000
 		time.Sleep(time.Millisecond * time.Duration(pauseTime))
 	}
-	cleanRedis(pool)
+	//cleanRedis(pool)
 
 }
 
-func detectSpiderSignal(pool *redis.Pool, spiderId string) {
+func detectSpiderSignal(rdb *redis.Client, spiderId string) {
 	for {
-		func() {
-			rdb := pool.Get()
-			defer rdb.Close()
-			stopStatusI, err := rdb.Do("HGET", "collyzar_spider_status", spiderId)
-			stopStatus := string(stopStatusI.([]byte))
-			if err != nil {
-				log.WithFields(log.Fields{
-					"collyzar": "get redis status error",
-				}).Error(err)
-			}
-			//pause
-			if stopStatus == "1" {
-				gSpiderStatus = "1"
-			}
-			//stop
-			if stopStatus == "2" {
-				gSpiderStatus = "2"
-				return
-			}
-		}()
+		stopStatus, err := rdb.HGet("collyzar_spider_status", spiderId).Result()
+		if err != nil {
+			log.WithFields(log.Fields{
+				"collyzar": "get redis status error",
+			}).Error(err)
+		}
+		//pause
+		if stopStatus == "1" {
+			gSpiderStatus = "1"
+		}
+		//stop
+		if stopStatus == "2" {
+			gSpiderStatus = "2"
+			return
+		}
+
 		time.Sleep(time.Second * 2)
 	}
 }
 
-func setSpiderSignal(pool *redis.Pool, spiderId string) {
-	rdb := pool.Get()
-	defer rdb.Close()
-
-	_, err := rdb.Do("HSET", "collyzar_spider_status", spiderId, gSpiderStatus)
+func setSpiderSignal(rdb *redis.Client, spiderId string) {
+	_, err := rdb.HSet("collyzar_spider_status", spiderId, gSpiderStatus).Result()
 	if err != nil {
 		log.WithFields(log.Fields{
 			"collyzar": "set spider signal error",
@@ -366,36 +342,36 @@ func setSpiderSignal(pool *redis.Pool, spiderId string) {
 	}
 }
 
-func cleanRedis(pool *redis.Pool) {
-	rdb := pool.Get()
-	defer rdb.Close()
+//func cleanRedis(pool *redis.Pool) {
+//	rdb := pool.Get()
+//	defer rdb.Close()
+//
+//	r, err := rdb.Do("keys", "zartenBF:*")
+//	if err != nil {
+//		log.WithFields(log.Fields{
+//			"collyzar": "del redis bloom queue error",
+//		}).Error(err)
+//	}
+//	rnames := r.([]interface{})
+//	for _, rn := range rnames {
+//		_, err := rdb.Do("DEL", string(rn.([]byte)))
+//		if err != nil {
+//			log.WithFields(log.Fields{
+//				"collyzar": "del redis bloom queue error",
+//			}).Error(err)
+//
+//		}
+//
+//		_, err = rdb.Do("HDEL", "collyzar_spider_status", spiderName)
+//		if err != nil {
+//			log.WithFields(log.Fields{
+//				"collyzar": "del redis bloom queue error",
+//			}).Error(err)
+//		}
+//	}
+//}
 
-	r, err := rdb.Do("keys", "zartenBF:*")
-	if err != nil {
-		log.WithFields(log.Fields{
-			"collyzar": "del redis bloom queue error",
-		}).Error(err)
-	}
-	rnames := r.([]interface{})
-	for _, rn := range rnames {
-		_, err := rdb.Do("DEL", string(rn.([]byte)))
-		if err != nil {
-			log.WithFields(log.Fields{
-				"collyzar": "del redis bloom queue error",
-			}).Error(err)
-
-		}
-
-		_, err = rdb.Do("HDEL", "collyzar_spider_status", spiderName)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"collyzar": "del redis bloom queue error",
-			}).Error(err)
-		}
-	}
-}
-
-func spiderWatch(c *colly.Collector, zarQ *zarQueue,) bool {
+func spiderWatch(c *colly.Collector, zarQ *zarQueue, ) bool {
 	if gSpiderStatus == "1" {
 		log.WithFields(log.Fields{
 			"collyzar": "spider status",
@@ -416,11 +392,11 @@ func spiderWatch(c *colly.Collector, zarQ *zarQueue,) bool {
 	}
 
 	urlInfoI := zarQ.pop()
-	if urlInfoI == nil{
+	if urlInfoI == nil {
 		return false
 	}
 
-	urlInfo := string(urlInfoI.([]byte))
+	urlInfo := urlInfoI.(string)
 	var oUrlInfo PushInfo
 	err := json.Unmarshal([]byte(urlInfo), &oUrlInfo)
 	if err != nil {
@@ -448,29 +424,23 @@ func spiderWatch(c *colly.Collector, zarQ *zarQueue,) bool {
 	return false
 }
 
-func getInfo(pool *redis.Pool, zarQ *zarQueue) {
+func getInfo(rdb *redis.Client, zarQ *zarQueue) {
 	for {
-		func(){
-			if zarQ.isFull(){
-				return
-			}
+		if zarQ.isFull() {
+			continue
+		}
+		urlInfo, err := rdb.RPop(spiderName).Result()
+		if err == redis.Nil{
+			time.Sleep(time.Second * 1)
+			continue
+		}else if err != nil{
+			log.WithFields(log.Fields{
+				"collyzar": "get redis spider queue error",
+			}).Error(err)
+		}else {
+			zarQ.push(urlInfo)
+		}
 
-			rdb := pool.Get()
-			defer rdb.Close()
-
-			urlInfoI, err := rdb.Do("RPOP", spiderName)
-			if err != nil {
-				log.WithFields(log.Fields{
-					"collyzar": "get redis spider queue error",
-				}).Error(err)
-			}
-			if urlInfoI == nil {
-				time.Sleep(time.Second * 1)
-				return
-			}
-			zarQ.push(urlInfoI)
-		}()
 		time.Sleep(time.Millisecond * 200)
 	}
 }
-
