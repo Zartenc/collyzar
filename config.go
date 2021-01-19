@@ -22,6 +22,7 @@ type SpiderSettings struct {
 	DisableCookies bool //default true
 	IsRetry bool //default true
 	RetryTimes int //default 3
+	IsBackupCookis bool //default false
 }
 
 type PushInfo struct {

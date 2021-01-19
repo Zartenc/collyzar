@@ -2,45 +2,40 @@ package collyzar
 
 import (
 	"encoding/json"
-	"github.com/garyburd/redigo/redis"
-
-	//"github.com/gomodule/redigo/redis"
+	"github.com/go-redis/redis"
 	"strconv"
+	log "github.com/sirupsen/logrus"
 )
 
 type ToolSpider struct {
-	Pool *redis.Pool
+	Rdb *redis.Client
 	SpiderName string
 }
 
-func NewToolSpider(redisIp string, redisPort int, redisPw ,spiderName string) *ToolSpider{
-	pool := &redis.Pool{
-		MaxActive:7000,
-		MaxIdle:2000,
-		Wait:true,
-		Dial:func() (redis.Conn, error) {
-			conn, err := redis.Dial("tcp", redisIp + ":" + strconv.Itoa(redisPort),
-				redis.DialPassword(redisPw),
-				redis.DialDatabase(1),)
-			if err != nil {
-				return nil, err
-			}
-			return conn, nil
-		},
+func NewToolSpider(redisip string, redisport int, redispw ,spidername string) *ToolSpider{
+	client := redis.NewClient(&redis.Options{
+		Addr:     redisip + ":" + strconv.Itoa(redisport),
+		Password: redispw,
+		DB:       1,
+	})
+	_, err := client.Ping().Result()
+	if err != nil{
+		log.WithFields(log.Fields{
+			"collyzar tool": "connect redis error",
+		}).Error(err)
+		return nil
 	}
-	return &ToolSpider{Pool:pool, SpiderName:spiderName}
+
+	return &ToolSpider{Rdb:client, SpiderName:spidername}
 }
 
 func (ts *ToolSpider)PushToQueue(pushInfo PushInfo) error{
-	rdb := ts.Pool.Get()
-	defer rdb.Close()
-
 	j, err:= json.Marshal(pushInfo)
 	if err != nil{
 		return err
 	}
 
-	_, err = rdb.Do("LPUSH", ts.SpiderName, j)
+	_, err = ts.Rdb.LPush(ts.SpiderName, j).Result()
 	if err != nil{
 		return err
 	}
@@ -48,10 +43,7 @@ func (ts *ToolSpider)PushToQueue(pushInfo PushInfo) error{
 }
 
 func (ts *ToolSpider)PauseSpiders() error{
-	rdb := ts.Pool.Get()
-	defer rdb.Close()
-
-	_, err := rdb.Do("HSET", "collyzar_spider_status", ts.SpiderName, "1")
+	_, err := ts.Rdb.HSet("collyzar_spider_status", ts.SpiderName, "1").Result()
 	if err != nil{
 		return err
 	}
@@ -59,10 +51,7 @@ func (ts *ToolSpider)PauseSpiders() error{
 }
 
 func (ts *ToolSpider)WakeupSpiders() error{
-	rdb := ts.Pool.Get()
-	defer rdb.Close()
-
-	_, err := rdb.Do("HSET", "collyzar_spider_status", ts.SpiderName, "0")
+	_, err := ts.Rdb.HSet("collyzar_spider_status", ts.SpiderName, "0").Result()
 	if err != nil{
 		return err
 	}
@@ -70,13 +59,9 @@ func (ts *ToolSpider)WakeupSpiders() error{
 }
 
 func (ts *ToolSpider)StopSpiders() error{
-	rdb := ts.Pool.Get()
-	defer rdb.Close()
-
-	_, err := rdb.Do("HSET", "collyzar_spider_status", ts.SpiderName, "2")
+	_, err := ts.Rdb.HSet("collyzar_spider_status", ts.SpiderName, "2").Result()
 	if err != nil{
 		return err
 	}
-
 	return nil
 }

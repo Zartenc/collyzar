@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"sync"
 	"time"
 )
 
@@ -30,6 +29,15 @@ type ZarRequest struct {
 	Headers  *http.Header
 	Method   string
 	ProxyURL string
+}
+
+func (zar *ZarResponse) RequestNew(newPushInfos PushInfo) error {
+	ts := NewToolSpider(redisIp, redisPort, redisPW, spiderName)
+	err := ts.PushToQueue(newPushInfos)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 type Callback func(*ZarResponse)
@@ -51,52 +59,9 @@ var (
 	disableCookies    bool //fefault true
 	isRetry           bool //default true
 	retryTimes        int  //default 3
+	isBackupCookis 	  bool //default false
 )
 
-func (zar *ZarResponse) RequestNew(newPushInfos PushInfo) error {
-	ts := NewToolSpider(redisIp, redisPort, redisPW, spiderName)
-	err := ts.PushToQueue(newPushInfos)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-var lock sync.Mutex
-
-type zarQueue struct {
-	queue   []interface{}
-	maxSize int
-}
-
-func (z *zarQueue) push(info interface{}) {
-	lock.Lock()
-	defer lock.Unlock()
-	z.queue = append(z.queue, info)
-}
-func (z *zarQueue) pop() interface{} {
-	lock.Lock()
-	defer lock.Unlock()
-	if len(z.queue) == 0 {
-		return nil
-	}
-	if len(z.queue) >= 1 {
-		var x interface{}
-		x, z.queue = z.queue[0], z.queue[1:]
-		return x
-	}
-	return nil
-
-}
-func (z *zarQueue) isFull() bool {
-	lock.Lock()
-	defer lock.Unlock()
-	if len(z.queue) >= z.maxSize {
-		return true
-	} else {
-		return false
-	}
-}
 
 func initParam(cs *CollyzarSettings, ss *SpiderSettings) {
 	if cs == nil {
@@ -123,6 +88,7 @@ func initParam(cs *CollyzarSettings, ss *SpiderSettings) {
 	disableCookies = ss.DisableCookies       //default true
 	isRetry = ss.IsRetry                     //default true
 	retryTimes = ss.RetryTimes               //default 3
+	isBackupCookis = ss.IsBackupCookis		 //default false
 
 	if redisPort == 0 {
 		redisPort = 6379
@@ -157,7 +123,7 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 
 	}
 	var err error
-	var zarQ = &zarQueue{maxSize: 50}
+	var zarQ = &zarQueue{maxSize: concurrentRequest * 2}
 
 	c := colly.NewCollector(
 		colly.AllowedDomains(domain),
@@ -207,7 +173,7 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 			DB:       1,
 			Prefix:   spiderName + "_filter",
 		},
-		IsStorageCookies: false,
+		IsStorageCookies: isBackupCookis,
 	}
 
 	err = c.SetStorage(storage)
@@ -297,7 +263,7 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 func spiderQueue(rdb *redis.Client, c *colly.Collector, zarQ *zarQueue) {
 	setSpiderSignal(rdb, spiderName)
 	go detectSpiderSignal(rdb, spiderName)
-	go getInfo(rdb, zarQ)
+	go genCache(rdb, zarQ)
 
 	for {
 		isStop := spiderWatch(c, zarQ)
@@ -307,7 +273,7 @@ func spiderQueue(rdb *redis.Client, c *colly.Collector, zarQ *zarQueue) {
 		pauseTime := rand.Intn(1000) //0-1000
 		time.Sleep(time.Millisecond * time.Duration(pauseTime))
 	}
-	//cleanRedis(pool)
+	cleanRedis(rdb)
 
 }
 
@@ -342,36 +308,23 @@ func setSpiderSignal(rdb *redis.Client, spiderId string) {
 	}
 }
 
-//func cleanRedis(pool *redis.Pool) {
-//	rdb := pool.Get()
-//	defer rdb.Close()
-//
-//	r, err := rdb.Do("keys", "zartenBF:*")
-//	if err != nil {
-//		log.WithFields(log.Fields{
-//			"collyzar": "del redis bloom queue error",
-//		}).Error(err)
-//	}
-//	rnames := r.([]interface{})
-//	for _, rn := range rnames {
-//		_, err := rdb.Do("DEL", string(rn.([]byte)))
-//		if err != nil {
-//			log.WithFields(log.Fields{
-//				"collyzar": "del redis bloom queue error",
-//			}).Error(err)
-//
-//		}
-//
-//		_, err = rdb.Do("HDEL", "collyzar_spider_status", spiderName)
-//		if err != nil {
-//			log.WithFields(log.Fields{
-//				"collyzar": "del redis bloom queue error",
-//			}).Error(err)
-//		}
-//	}
-//}
+func cleanRedis(rdb *redis.Client) {
+	_, err := rdb.HDel("collyzar_spider_status", spiderName).Result()
+	if err != nil {
+		log.WithFields(log.Fields{
+			"collyzar": "del redis bloom queue error",
+		}).Error(err)
+	}
 
-func spiderWatch(c *colly.Collector, zarQ *zarQueue, ) bool {
+	_, err = rdb.Del(spiderName + "_filter_bloom").Result()
+	if err != nil {
+		log.WithFields(log.Fields{
+			"collyzar": "del redis bloom queue error",
+		}).Error(err)
+	}
+}
+
+func spiderWatch(c *colly.Collector, zarQ *zarQueue) bool {
 	if gSpiderStatus == "1" {
 		log.WithFields(log.Fields{
 			"collyzar": "spider status",
@@ -420,7 +373,7 @@ func spiderWatch(c *colly.Collector, zarQ *zarQueue, ) bool {
 	return false
 }
 
-func getInfo(rdb *redis.Client, zarQ *zarQueue) {
+func genCache(rdb *redis.Client, zarQ *zarQueue) {
 	for {
 		if zarQ.isFull() {
 			continue
