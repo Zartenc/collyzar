@@ -64,6 +64,7 @@ var (
 	isRetry           bool //default true
 	retryTimes        int  //default 3
 	isBackupCookis 	  bool //default false
+	dontFilter		  bool //default false
 )
 
 
@@ -93,6 +94,7 @@ func initParam(cs *CollyzarSettings, ss *SpiderSettings) {
 	isRetry = ss.IsRetry                     //default true
 	retryTimes = ss.RetryTimes               //default 3
 	isBackupCookis = ss.IsBackupCookis		 //default false
+	dontFilter = ss.DontFilter				 //default false
 
 	if redisPort == 0 {
 		redisPort = 6379
@@ -156,6 +158,10 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 
 	if disableCookies {
 		c.DisableCookies()
+	}
+
+	if dontFilter{
+		c.AllowURLRevisit = true
 	}
 
 	extensions.RandomUserAgent(c) //desktop ua
@@ -298,6 +304,17 @@ func spiderWatch(c *colly.Collector, zarQ *zarQueue, callback Callback) bool {
 		}).Error(err)
 	}
 
+	if dontFilter{
+		ctx := colly.NewContext()
+		ctx.Put("url_info", oUrlInfo)
+		err = c.Request("GET", oUrlInfo.Url, nil, ctx, nil)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"collyzar": "visit url error",
+			}).Error(err)
+		}
+		return false
+	}
 
 	if oUrlInfo.DontFilter{
 		retryc := c.Clone()
