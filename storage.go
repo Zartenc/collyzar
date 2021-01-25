@@ -7,7 +7,7 @@ import (
 	"github.com/gocolly/redisstorage"
 	"log"
 	"net/url"
-	"github.com/Zartenc/collyzar/bloom"
+	"github.com/Zartenc/collyzar/v2/bloom"
 	"sync"
 	"time"
 )

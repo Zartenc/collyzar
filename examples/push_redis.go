@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/Zartenc/collyzar"
+	"github.com/Zartenc/collyzar/v2"
 	"fmt"
 )
 
