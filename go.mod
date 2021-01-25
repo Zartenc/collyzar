@@ -1,4 +1,4 @@
-module github.com/Zartenc/collyzar
+module github.com/Zartenc/collyzar/v2
 
 go 1.14
 
