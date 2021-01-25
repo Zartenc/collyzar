@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"github.com/Zartenc/collyzar/bloom"
 	"sync"
+	"time"
 )
 
 type RedisStorage struct {
@@ -24,6 +25,10 @@ func (s *RedisStorage) Init() error {
 			Addr:     s.Address,
 			Password: s.Password,
 			DB:       s.DB,
+			DialTimeout: time.Second * 60,
+			ReadTimeout:  -1,
+			WriteTimeout: -1,
+
 		})
 	}
 	_, err := s.Client.Ping().Result()

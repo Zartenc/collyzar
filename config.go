@@ -28,6 +28,7 @@ type SpiderSettings struct {
 type PushInfo struct {
 	Url string
 	EInfo ExtraInfo
+	DontFilter bool
 }
 
 type ExtraInfo struct {

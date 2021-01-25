@@ -31,14 +31,18 @@ type ZarRequest struct {
 	ProxyURL string
 }
 
-func (zar *ZarResponse) RequestNew(newPushInfos PushInfo) error {
+func (zar *ZarResponse) RequestNew(newPushInfos PushInfo, isCheckHasVisited bool) error {
 	ts := NewToolSpider(redisIp, redisPort, redisPW, spiderName)
+	if !isCheckHasVisited{
+		newPushInfos.DontFilter = true
+	}
 	err := ts.PushToQueue(newPushInfos)
 	if err != nil {
 		return err
 	}
 	return nil
 }
+
 
 type Callback func(*ZarResponse)
 
@@ -184,89 +188,29 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 	}
 
 	c.OnRequest(func(r *colly.Request) {
-		r.Headers.Set("Referer", referer)
-		r.Headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-		r.Headers.Set("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
-		r.Headers.Set("Cookie", cookie)
-
+		r.Headers = handleHeaders()
 	})
 
 	c.OnError(func(r *colly.Response, err error) {
-		log.WithFields(log.Fields{
-			"collyzar": "problem with download",
-		}).Debug(err)
-
-		if isRetry {
-			err = r.Request.Retry()
-			if err != nil {
-				log.WithFields(log.Fields{
-					"collyzar": "retry visit error",
-				}).Error(err)
-			}
-		}
+		handleError(r, err)
 	})
 
 	c.OnResponse(func(r *colly.Response) {
-		statusCode := r.StatusCode
-		retryHttpCodes := []int{500, 502, 503, 504, 522, 524, 408, 429}
-		isRetryCode := false
-		for _, s := range retryHttpCodes {
-			if statusCode == s {
-				isRetryCode = true
-				break
-			}
-		}
-		if isRetry && isRetryCode {
-			var reqTimes int
-			reqTimesIf := r.Ctx.GetAny("req_times")
-			if reqTimesIf == nil {
-				reqTimes = 1
-				r.Request.Ctx.Put("req_times", reqTimes)
-			} else {
-				reqTimes = reqTimesIf.(int)
-			}
-
-			if reqTimes <= retryTimes {
-				reqTimes += 1
-				r.Request.Ctx.Put("req_times", reqTimes)
-				err = r.Request.Retry()
-				if err != nil {
-					log.WithFields(log.Fields{
-						"collyzar": "OnResponse retry visit Error",
-					}).Error(err)
-				}
-			}
-		} else {
-			zarReq := new(ZarRequest)
-			zarReq.URL = r.Request.URL
-			zarReq.Headers = r.Request.Headers
-			zarReq.Method = r.Request.Method
-			zarReq.ProxyURL = r.Request.ProxyURL
-
-			zarRes := new(ZarResponse)
-			zarRes.StatusCode = r.StatusCode
-			zarRes.Body = r.Body
-			zarRes.Headers = r.Headers
-			zarRes.Request = zarReq
-			zarRes.PushInfos = r.Ctx.GetAny("url_info").(PushInfo)
-
-			callback(zarRes)
-		}
-
+		handleResponse(callback, r)
 	})
 
-	spiderQueue(storage.Client, c, zarQ)
+	spiderQueue(storage.Client, c, zarQ, callback)
 	c.Wait()
 
 }
 
-func spiderQueue(rdb *redis.Client, c *colly.Collector, zarQ *zarQueue) {
+func spiderQueue(rdb *redis.Client, c *colly.Collector, zarQ *zarQueue, callback Callback) {
 	setSpiderSignal(rdb, spiderName)
 	go detectSpiderSignal(rdb, spiderName)
 	go genCache(rdb, zarQ)
 
 	for {
-		isStop := spiderWatch(c, zarQ)
+		isStop := spiderWatch(c, zarQ, callback)
 		if isStop {
 			break
 		}
@@ -324,7 +268,7 @@ func cleanRedis(rdb *redis.Client) {
 	}
 }
 
-func spiderWatch(c *colly.Collector, zarQ *zarQueue) bool {
+func spiderWatch(c *colly.Collector, zarQ *zarQueue, callback Callback) bool {
 	if gSpiderStatus == "1" {
 		log.WithFields(log.Fields{
 			"collyzar": "spider status",
@@ -352,6 +296,32 @@ func spiderWatch(c *colly.Collector, zarQ *zarQueue) bool {
 		log.WithFields(log.Fields{
 			"collyzar": "redis push info serialize error",
 		}).Error(err)
+	}
+
+
+	if oUrlInfo.DontFilter{
+		retryc := c.Clone()
+		retryc.AllowURLRevisit = true
+		retryc.OnRequest(func(r *colly.Request) {
+			r.Headers = handleHeaders()
+		})
+		retryc.OnError(func(r *colly.Response, err error) {
+			handleError(r, err)
+		})
+
+		retryc.OnResponse(func(r *colly.Response) {
+			handleResponse(callback, r)
+		})
+
+		ctx := colly.NewContext()
+		ctx.Put("url_info", oUrlInfo)
+		err = retryc.Request("GET", oUrlInfo.Url, nil, ctx, nil)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"collyzar": "user retry request error",
+			}).Error(err)
+		}
+
 	}
 
 	isV, err := c.HasVisited(oUrlInfo.Url)
@@ -391,5 +361,79 @@ func genCache(rdb *redis.Client, zarQ *zarQueue) {
 		}
 
 		time.Sleep(time.Millisecond * 200)
+	}
+}
+
+func handleHeaders() *http.Header{
+	headers := &http.Header{}
+	headers.Set("Referer", referer)
+	headers.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	headers.Set("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
+	headers.Set("Cookie", cookie)
+	return headers
+}
+
+func handleResponse(callback Callback, r *colly.Response){
+	statusCode := r.StatusCode
+	retryHttpCodes := []int{500, 502, 503, 504, 522, 524, 408, 429}
+	isRetryCode := false
+	for _, s := range retryHttpCodes {
+		if statusCode == s {
+			isRetryCode = true
+			break
+		}
+	}
+	if isRetry && isRetryCode {
+		var reqTimes int
+		reqTimesIf := r.Ctx.GetAny("req_times")
+		if reqTimesIf == nil {
+			reqTimes = 1
+			r.Request.Ctx.Put("req_times", reqTimes)
+		} else {
+			reqTimes = reqTimesIf.(int)
+		}
+
+		if reqTimes <= retryTimes {
+			reqTimes += 1
+			r.Request.Ctx.Put("req_times", reqTimes)
+			err := r.Request.Retry()
+			if err != nil {
+				log.WithFields(log.Fields{
+					"collyzar": "OnResponse retry visit Error",
+				}).Error(err)
+			}
+		}
+	} else {
+		zarReq := new(ZarRequest)
+		zarReq.URL = r.Request.URL
+		zarReq.Headers = r.Request.Headers
+		zarReq.Method = r.Request.Method
+		zarReq.ProxyURL = r.Request.ProxyURL
+
+		zarRes := new(ZarResponse)
+		zarRes.StatusCode = r.StatusCode
+		zarRes.Body = r.Body
+		zarRes.Headers = r.Headers
+		zarRes.Request = zarReq
+		zarRes.PushInfos = r.Ctx.GetAny("url_info").(PushInfo)
+		zarRes.PushInfos.DontFilter = false
+
+		callback(zarRes)
+	}
+
+}
+
+func handleError(r *colly.Response, err error){
+	log.WithFields(log.Fields{
+		"collyzar": "problem with download",
+	}).Debug(err)
+
+	if isRetry {
+		err = r.Request.Retry()
+		if err != nil {
+			log.WithFields(log.Fields{
+				"collyzar": "retry visit error",
+			}).Error(err)
+		}
 	}
 }
