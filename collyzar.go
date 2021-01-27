@@ -207,12 +207,12 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 
 	spiderQueue(storage.Client, c, zarQ, callback)
 	c.Wait()
-
+	cleanRedis()
 }
 
 func spiderQueue(rdb *redis.Client, c *colly.Collector, zarQ *zarQueue, callback Callback) {
-	setSpiderSignal(rdb, spiderName)
-	go detectSpiderSignal(rdb, spiderName)
+	setSpiderSignal(rdb)
+	go detectSpiderSignal(rdb)
 	go genCache(rdb, zarQ)
 
 	for {
@@ -223,14 +223,17 @@ func spiderQueue(rdb *redis.Client, c *colly.Collector, zarQ *zarQueue, callback
 		pauseTime := rand.Intn(1000) //0-1000
 		time.Sleep(time.Millisecond * time.Duration(pauseTime))
 	}
-	cleanRedis(rdb)
 
 }
 
-func detectSpiderSignal(rdb *redis.Client, spiderId string) {
+func detectSpiderSignal(rdb *redis.Client) {
 	for {
-		stopStatus, err := rdb.HGet("collyzar_spider_status", spiderId).Result()
-		if err != nil {
+		stopStatus, err := rdb.HGet("collyzar_spider_status", spiderName).Result()
+		if err == redis.Nil{
+			log.WithFields(log.Fields{
+				"collyzar": "get redis status redis nil",
+			}).Error(err)
+		} else if err != nil {
 			log.WithFields(log.Fields{
 				"collyzar": "get redis status error",
 			}).Error(err)
@@ -249,25 +252,48 @@ func detectSpiderSignal(rdb *redis.Client, spiderId string) {
 	}
 }
 
-func setSpiderSignal(rdb *redis.Client, spiderId string) {
-	_, err := rdb.HSet("collyzar_spider_status", spiderId, gSpiderStatus).Result()
+func setSpiderSignal(rdb *redis.Client) {
+	_, err := rdb.HSet("collyzar_spider_status", spiderName, gSpiderStatus).Result()
 	if err != nil {
 		log.WithFields(log.Fields{
 			"collyzar": "set spider signal error",
 		}).Error(err)
 	}
+
+	_, err = rdb.Incr(spiderName + "_counts").Result()
+	if err != nil {
+		log.WithFields(log.Fields{
+			"collyzar": "set spider count error",
+		}).Error(err)
+	}
+
 }
 
-func cleanRedis(rdb *redis.Client) {
+func cleanRedis() {
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     redisIp + ":" + strconv.Itoa(redisPort),
+		Password: redisPW,
+		DB:       1,
+	})
+	defer rdb.Close()
+
+	spidersCount := rdb.Decr(spiderName + "_counts").Val()
+	if spidersCount > 0{
+		return
+	}
+
 	_, err := rdb.HDel("collyzar_spider_status", spiderName).Result()
-	if err != nil {
+	if err == redis.Nil{
+		return
+	}else if err != nil {
 		log.WithFields(log.Fields{
 			"collyzar": "del redis bloom queue error",
 		}).Error(err)
 	}
-
-	_, err = rdb.Del(spiderName + "_filter_bloom").Result()
-	if err != nil {
+	_, err = rdb.Del(spiderName + "_filter_bloom", spiderName + "_counts").Result()
+	if err == redis.Nil{
+		return
+	} else if err != nil {
 		log.WithFields(log.Fields{
 			"collyzar": "del redis bloom queue error",
 		}).Error(err)

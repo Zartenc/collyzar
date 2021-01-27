@@ -8,6 +8,8 @@ Collyzar provides a very simple configuration and tools to implement distributed
 
 - Simple configuration and clean API       
 - Distributed crawling/scraping     
+- Built-in global bloom filter        
+- Built-in spider cache        
 - Support redis command     
 - Multi-machine load balancing    
 - Support to pause or stop all crawling machines     
@@ -22,7 +24,7 @@ module github.com/x/y
 go 1.14
 
 require (
-        github.com/Zartenc/collyzar latest
+        github.com/Zartenc/collyzar/v2 latest
 )
 ```     
 
