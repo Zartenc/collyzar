@@ -198,7 +198,7 @@ func Run(callback Callback, cs *CollyzarSettings, ss *SpiderSettings) {
 	})
 
 	c.OnError(func(r *colly.Response, err error) {
-		handleError(r, err)
+		handleError(callback, r, err)
 	})
 
 	c.OnResponse(func(r *colly.Response) {
@@ -349,7 +349,7 @@ func spiderWatch(c *colly.Collector, zarQ *zarQueue, callback Callback) bool {
 			r.Headers = handleHeaders()
 		})
 		retryc.OnError(func(r *colly.Response, err error) {
-			handleError(r, err)
+			handleError(callback, r, err)
 		})
 
 		retryc.OnResponse(func(r *colly.Response) {
@@ -447,36 +447,59 @@ func handleResponse(callback Callback, r *colly.Response){
 			}
 		}
 	} else {
-		zarReq := new(ZarRequest)
-		zarReq.URL = r.Request.URL
-		zarReq.Headers = r.Request.Headers
-		zarReq.Method = r.Request.Method
-		zarReq.ProxyURL = r.Request.ProxyURL
-
-		zarRes := new(ZarResponse)
-		zarRes.StatusCode = r.StatusCode
-		zarRes.Body = r.Body
-		zarRes.Headers = r.Headers
-		zarRes.Request = zarReq
-		zarRes.PushInfos = r.Ctx.GetAny("url_info").(PushInfo)
-		zarRes.PushInfos.DontFilter = false
-
-		callback(zarRes)
+		handleCallbackResponse(callback, r)
 	}
 
 }
 
-func handleError(r *colly.Response, err error){
+func handleError(callback Callback, r *colly.Response, err error){
 	log.WithFields(log.Fields{
 		"collyzar": "problem with download",
 	}).Debug(err)
 
 	if isRetry {
-		err = r.Request.Retry()
-		if err != nil {
-			log.WithFields(log.Fields{
-				"collyzar": "retry visit error",
-			}).Error(err)
+		var reqTimes int
+		reqTimesIf := r.Ctx.GetAny("req_times")
+		if reqTimesIf == nil {
+			reqTimes = 1
+			r.Request.Ctx.Put("req_times", reqTimes)
+		} else {
+			reqTimes = reqTimesIf.(int)
 		}
+
+		if reqTimes <= retryTimes {
+			reqTimes += 1
+			r.Request.Ctx.Put("req_times", reqTimes)
+			err = r.Request.Retry()
+			if err != nil {
+				log.WithFields(log.Fields{
+					"collyzar": "retry visit error",
+				}).Error(err)
+			}
+		}else {
+			handleCallbackResponse(callback, r)
+		}
+	}else {
+		handleCallbackResponse(callback, r)
 	}
+
+}
+
+func handleCallbackResponse(callback Callback, r *colly.Response){
+	zarReq := new(ZarRequest)
+	zarReq.URL = r.Request.URL
+	zarReq.Headers = r.Request.Headers
+	zarReq.Method = r.Request.Method
+	zarReq.ProxyURL = r.Request.ProxyURL
+
+	zarRes := new(ZarResponse)
+	zarRes.StatusCode = r.StatusCode
+	zarRes.Body = r.Body
+	zarRes.Headers = r.Headers
+	zarRes.Request = zarReq
+	zarRes.PushInfos = r.Ctx.GetAny("url_info").(PushInfo)
+	zarRes.PushInfos.DontFilter = false
+
+	callback(zarRes)
+
 }

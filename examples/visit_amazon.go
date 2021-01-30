@@ -11,6 +11,8 @@ func main(){
 		Domain:     "www.amazon.com",
 		RedisIp:    "127.0.0.1",
 	}
+
+
 	collyzar.Run(myResponse, cs, nil)
 }
 
